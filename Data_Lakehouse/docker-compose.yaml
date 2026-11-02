@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   seaweedfs:
     image: chrislusf/seaweedfs:latest
@@ -12,14 +10,26 @@ services:
       iceberg_net:
         aliases:
           - minio
-          - warehouse.minio
     environment:
       - AWS_ACCESS_KEY_ID=admin
       - AWS_SECRET_ACCESS_KEY=password
+  
+  s3-init:
+    image: amazon/aws-cli:latest
+    container_name: s3-init
+    depends_on:
+      - seaweedfs
+    networks:
+      - iceberg_net
+    environment:
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=password
+      - AWS_DEFAULT_REGION=us-east-1
+    entrypoint: ["/bin/sh", "-c", "echo 'Waiting for SeaweedFS S3 API...' && until aws --endpoint-url http://seaweedfs:9000 s3 ls > /dev/null 2>&1; do sleep 1; done; echo 'Creating warehouse bucket...' && aws --endpoint-url http://seaweedfs:9000 s3 mb s3://warehouse || true; echo 'Bucket ready!'"]
 
   rest:
     image: apache/iceberg-rest-fixture:latest
-    container_name: iceberg-rest
+    container_name: rest
     ports:
       - "8181:8181"
     networks:
@@ -34,12 +44,13 @@ services:
 
   spark-iceberg:
     build:
-      context: .
-      dockerfile: spark/Dockerfile
+      context: ./spark
+      dockerfile: Dockerfile
     container_name: spark-iceberg
     depends_on:
       - rest
       - seaweedfs
+      - s3-init
     networks:
       - iceberg_net
     environment:
@@ -53,7 +64,7 @@ services:
       - "10000:10000"
     volumes:
       - .:/home/iceberg/notebooks
-    command: ["/bin/bash", "/home/iceberg/notebooks/spark/entrypoint.sh", "jupyter lab --ip=0.0.0.0 --allow-root --NotebookApp.token=''"]
+    command: ["/bin/bash", "/home/iceberg/notebooks/spark/entrypoint.sh"]
 
 networks:
   iceberg_net:

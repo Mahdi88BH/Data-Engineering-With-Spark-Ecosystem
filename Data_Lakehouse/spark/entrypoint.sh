@@ -17,13 +17,28 @@
 # specific language governing permissions and limitations
 # under the License.
 
-start-master.sh -p 7077
-start-worker.sh spark://spark-iceberg:7077
 
-start-history-server.sh
-start-thriftserver.sh  --driver-java-options "-Dderby.system.home=/tmp/derby"
+# Démarrage des services Spark en arrière-plan (uniquement s'ils ne tournent pas déjà)
+if ! pgrep -f "org.apache.spark.deploy.master.Master" > /dev/null; then
+    start-master.sh -p 7077
+fi
 
-# Entrypoint, for example notebook, pyspark or spark-sql
+if ! pgrep -f "org.apache.spark.deploy.worker.Worker" > /dev/null; then
+    start-worker.sh spark://spark-iceberg:7077
+fi
+
+if ! pgrep -f "org.apache.spark.deploy.history.HistoryServer" > /dev/null; then
+    start-history-server.sh
+fi
+
+if ! pgrep -f "org.apache.spark.sql.hive.thriftserver.HiveThriftServer2" > /dev/null; then
+    start-thriftserver.sh --driver-java-options "-Dderby.system.home=/tmp/derby"
+fi
+
+# Exécution de la commande passée ou lancement de Jupyter Lab via le module Python
 if [[ $# -gt 0 ]] ; then
-    eval "$1"
+    exec "$@"
+else
+    # Utilisation explicite du module Python pour éviter les erreurs "command not found"
+    exec python3 -m jupyter lab --ip=0.0.0.0 --allow-root --NotebookApp.token=''
 fi
