@@ -1,0 +1,21 @@
+services:
+  delta-notebook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: delta-lake-jupyter
+    ports:
+      - "8888:8888"
+    environment:
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN:-deltalake}
+      SPARK_LOCAL_IP: 127.0.0.1
+      PYSPARK_PYTHON: python3
+      PYSPARK_DRIVER_PYTHON: python3
+    volumes:
+      - ./notebooks:/workspace/notebooks
+      - ./data:/workspace/data
+      - ./logs:/workspace/logs
+    working_dir: /workspace
+    restart: unless-stopped
+    # Ajuste la mémoire dans Docker Desktop si nécessaire.
+    # Pour commencer, 4 CPU et 6 Go de RAM sont confortables.
