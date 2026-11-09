@@ -10,6 +10,7 @@ services:
       JUPYTER_TOKEN: ${JUPYTER_TOKEN:-pyspark-local}
     volumes:
       - ./notebooks:/workspace/notebooks
+      - ./images:/workspace/images
       - ./data:/workspace/data
       - ./warehouse:/workspace/warehouse
     working_dir: /workspace
