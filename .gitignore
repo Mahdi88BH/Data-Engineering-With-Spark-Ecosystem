@@ -7,3 +7,4 @@ venv/
 *.pyc
 Delta_Lake/data
 Delta_Lake/logs
+data_Q3_2019
