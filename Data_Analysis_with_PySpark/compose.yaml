@@ -6,6 +6,7 @@ services:
     container_name: pyspark-jupyter
     ports:
       - "8888:8888"
+      - "4040:4040"
     environment:
       JUPYTER_TOKEN: ${JUPYTER_TOKEN:-pyspark-local}
     volumes:
