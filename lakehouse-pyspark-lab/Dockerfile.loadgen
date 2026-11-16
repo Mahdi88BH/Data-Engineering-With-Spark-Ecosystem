@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install required Python dependencies for database connectivity and SeaweedFS (S3) uploads
+RUN pip install --no-cache-dir \
+    minio==7.2.7 \
+    psycopg2-binary==2.9.9 \
+    barnum==0.5.1
+
+# Copy the load generator script into the container workdir
+COPY generate_load.py .
+
+# Execute the mock data load script upon container startup
+CMD ["python", "generate_load.py"]

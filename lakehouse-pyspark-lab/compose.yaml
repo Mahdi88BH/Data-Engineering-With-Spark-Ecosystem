@@ -55,10 +55,12 @@ services:
   seaweedfs:
     image: chrislusf/seaweedfs:latest
     container_name: seaweedfs
-    command: >
-      server -s3 -dir=/data -volume.max=5
-      -master.port=9333 -volume.port=8080 -filer.port=8888 -s3.port=8333
-      -ip=seaweedfs -ip.bind=0.0.0.0
+    command: "server -s3 -dir=/data"
+    #command: server -s3 -master.port=9333 -volume.port=8080 -filer.port=8888 -s3.port=8333 -dir=/data -metrics.port=9327
+    #command: >
+    #  server -s3 -dir=/data -volume.max=5
+    #  -master.port=9333 -volume.port=8080 -filer.port=8888 -s3.port=8333
+    #  -ip=seaweedfs -ip.bind=0.0.0.0
     restart: unless-stopped
     ports:
       - "9333:9333"
@@ -68,6 +70,56 @@ services:
     volumes:
       - seaweedfs_data:/data
     networks: [lakehouse]
+  
+
+  postgres:
+    image: postgres:16
+    hostname: postgres
+    container_name: postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgresuser
+      - POSTGRES_PASSWORD=postgrespw
+      - POSTGRES_DB=oneshop
+      - PGPASSWORD=postgrespw
+    volumes:
+      - ./postgres/postgres_bootstrap.sql:/docker-entrypoint-initdb.d/postgres_bootstrap.sql
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgresuser -d oneshop"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - lakehouse
+
+  loadgen:
+    build:
+      context: .
+      dockerfile: Dockerfile.loadgen  # Or your loadgen container build setup
+    container_name: lakehouse-loadgen
+    restart: "no"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgresuser
+      - POSTGRES_PASSWORD=postgrespw
+      - POSTGRES_DB=oneshop
+      - S3_ENDPOINT=seaweedfs:8333
+      - S3_ACCESS_KEY=lakehouse
+      - S3_SECRET_KEY=lakehouse-secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+      #seaweedfs:
+      #  condition: service_started
+      seaweedfs-init:
+        condition: service_completed_successfully
+    networks:
+      - lakehouse
 
   seaweedfs-init:
     image: amazon/aws-cli:2.27.0
@@ -81,6 +133,7 @@ services:
     command: >
       "until aws --endpoint-url http://seaweedfs:8333 s3api list-buckets >/dev/null 2>&1; do sleep 2; done;
        aws --endpoint-url http://seaweedfs:8333 s3 mb s3://warehouse || true;
+       aws --endpoint-url http://seaweedfs:8333 s3 mb s3://pageviews || true;
        echo 'S3 warehouse bucket ready'"
     networks: [lakehouse]
     restart: "no"
@@ -92,3 +145,5 @@ networks:
 volumes:
   seaweedfs_data:
   iceberg_catalog_data:
+  postgres_data:
+    driver: local
