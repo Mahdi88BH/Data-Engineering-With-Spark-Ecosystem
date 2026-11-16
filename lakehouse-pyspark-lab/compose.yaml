@@ -1,0 +1,94 @@
+name: lakehouse-lab
+
+services:
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lakehouse-jupyter
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN:-lakehouse}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-lakehouse}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-lakehouse-secret}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1  # <--- ADD THIS LINE
+    ports:
+      - "8888:8888"
+      - "4040-4050:4040-4050"
+    volumes:
+      - ./notebooks:/workspace/notebooks
+      - ./data:/workspace/data
+      - ./images:/workspace/images
+    depends_on:
+      - iceberg-rest
+      - seaweedfs
+    networks: [lakehouse]
+    command: ["--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--ServerApp.root_dir=/workspace"]
+
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture
+    container_name: iceberg-rest
+    restart: unless-stopped
+    user: "0:0"  # Forces the container to run as root so it can read/write its SQLite database file
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-lakehouse}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-lakehouse-secret}
+      AWS_REGION: us-east-1
+      CATALOG_CATALOG__IMPL: org.apache.iceberg.jdbc.JdbcCatalog
+      CATALOG_URI: jdbc:sqlite:/var/lib/iceberg/iceberg_catalog.db?journal_mode=WAL
+      CATALOG_JDBC_USER: user
+      CATALOG_JDBC_PASSWORD: password
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://seaweedfs:8333
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+    ports:
+      - "8181:8181"
+    volumes:
+      - iceberg_catalog_data:/var/lib/iceberg
+    depends_on:
+      - seaweedfs
+    networks: [lakehouse]
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: seaweedfs
+    command: >
+      server -s3 -dir=/data -volume.max=5
+      -master.port=9333 -volume.port=8080 -filer.port=8888 -s3.port=8333
+      -ip=seaweedfs -ip.bind=0.0.0.0
+    restart: unless-stopped
+    ports:
+      - "9333:9333"
+      - "8080:8080"
+      - "8889:8888"
+      - "8333:8333"
+    volumes:
+      - seaweedfs_data:/data
+    networks: [lakehouse]
+
+  seaweedfs-init:
+    image: amazon/aws-cli:2.27.0
+    container_name: seaweedfs-init
+    depends_on: [seaweedfs]
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-lakehouse}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-lakehouse-secret}
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "until aws --endpoint-url http://seaweedfs:8333 s3api list-buckets >/dev/null 2>&1; do sleep 2; done;
+       aws --endpoint-url http://seaweedfs:8333 s3 mb s3://warehouse || true;
+       echo 'S3 warehouse bucket ready'"
+    networks: [lakehouse]
+    restart: "no"
+
+networks:
+  lakehouse:
+    driver: bridge
+
+volumes:
+  seaweedfs_data:
+  iceberg_catalog_data:
