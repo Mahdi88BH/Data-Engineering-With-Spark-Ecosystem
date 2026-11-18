@@ -51,6 +51,12 @@ services:
     depends_on:
       - seaweedfs
     networks: [lakehouse]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8181' && exit 0 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   seaweedfs:
     image: chrislusf/seaweedfs:latest
@@ -71,7 +77,6 @@ services:
       - seaweedfs_data:/data
     networks: [lakehouse]
   
-
   postgres:
     image: postgres:16
     hostname: postgres
@@ -137,6 +142,67 @@ services:
        echo 'S3 warehouse bucket ready'"
     networks: [lakehouse]
     restart: "no"
+
+  trino:
+    image: 'trinodb/trino:latest'
+    hostname: trino
+    container_name: trino
+    restart: unless-stopped
+    volumes:
+      - ./trino/etc:/etc/trino
+    ports:
+      - '9090:8080'
+    depends_on:
+      iceberg-rest:
+        condition: service_healthy
+    networks:
+      - lakehouse
+
+  superset:
+    image: apache/superset:latest
+    container_name: superset
+    restart: unless-stopped
+    environment:
+      - SUPERSET_SECRET_KEY=mysecretkey
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin
+      - ADMIN_FIRST_NAME=Superset
+      - ADMIN_LAST_NAME=Admin
+      - ADMIN_EMAIL=admin@example.com
+      - DATABASE_URL=postgresql+psycopg2://superset:superset@superset-db:5432/superset
+    depends_on:
+      - superset-db
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./superset/superset_home:/app/superset_home
+    networks:
+      - lakehouse
+    command: >
+      /bin/sh -c "
+      superset db upgrade &&
+      superset fab create-admin --username admin --firstname Superset --lastname Admin --email admin@example.com --password admin || true &&
+      superset init &&
+      superset run -h 0.0.0.0 -p 8088
+      "
+
+  superset-db:
+    image: postgres:15
+    container_name: superset-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: superset
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset
+    volumes:
+      - ./superset/superset_db_data:/var/lib/postgresql/data
+    networks:
+      - lakehouse
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset -d superset"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 networks:
   lakehouse:
