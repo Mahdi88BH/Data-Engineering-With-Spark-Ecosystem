@@ -205,6 +205,70 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+  
+  airflow:
+    build: 
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: airflow
+    restart: unless-stopped
+    environment:
+      - AIRFLOW__CORE__TEST_CONNECTION=Enabled  # Active le bouton Test
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
+      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+      - AIRFLOW__SMTP__SMTP_HOST=mailhog
+      - AIRFLOW__SMTP__SMTP_PORT=1025
+      - AIRFLOW__SMTP__SMTP_STARTTLS=False
+      - AIRFLOW__SMTP__SMTP_SSL=False
+      - AIRFLOW__SMTP__SMTP_MAIL_FROM=airflow@example.com
+      - AIRFLOW_CONN_SMTP_DEFAULT=smtp://mailhog:1025?disable_ssl=true&disable_tls=true
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    ports:
+      - "8085:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./trino/etc/certs/trino.crt:/opt/airflow/certs/trino.crt:ro
+    command: >
+      bash -c "
+      airflow db init &&
+      airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin &&
+      (airflow webserver & airflow scheduler)
+      "
+    networks:
+      - lakehouse
+  
+  airflow-postgres:
+    image: postgres:16
+    container_name: airflow-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    volumes:
+      - airflow_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks: [lakehouse]
+  
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"   # Port SMTP
+      - "8025:8025"   # Interface web
+    networks: [lakehouse]
 
 networks:
   lakehouse:
@@ -215,3 +279,4 @@ volumes:
   iceberg_catalog_data:
   postgres_data:
     driver: local
+  airflow_postgres_data:

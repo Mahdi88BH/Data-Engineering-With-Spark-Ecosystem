@@ -1,0 +1,9 @@
+# Utilisez une version d'Airflow compatible avec le provider Trino
+FROM apache/airflow:2.11.0-python3.11
+
+# Épinglez la version du provider pour éviter les mises à jour incontrôlées
+RUN pip install --no-cache-dir \
+    apache-airflow-providers-trino==6.7.1 \
+    apache-airflow-providers-smtp \
+    boto3 \
+    pandas
