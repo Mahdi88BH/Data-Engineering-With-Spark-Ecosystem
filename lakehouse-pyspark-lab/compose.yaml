@@ -159,7 +159,9 @@ services:
       - lakehouse
 
   superset:
-    image: apache/superset:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.superset
     container_name: superset
     restart: unless-stopped
     environment:

@@ -1,0 +1,11 @@
+FROM apache/superset:latest
+
+USER root
+
+# Use `uv` (bundled with the image) to install the Trino driver
+# into the virtual environment that Superset actually uses.
+RUN uv pip install --python /app/.venv/bin/python \
+    "trino[sqlalchemy]" \
+    psycopg2-binary
+
+USER superset
