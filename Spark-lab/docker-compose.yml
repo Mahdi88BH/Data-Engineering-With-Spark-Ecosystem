@@ -1,0 +1,98 @@
+services:
+  spark-master:
+    build: .
+    image: local-pyspark:3.5.1
+    container_name: spark-master
+    hostname: spark-master
+    command: >
+      /opt/spark/bin/spark-class
+      org.apache.spark.deploy.master.Master
+      --host spark-master
+      --port 7077
+      --webui-port 8080
+    environment:
+      PYSPARK_PYTHON: python3
+      PYSPARK_DRIVER_PYTHON: python3
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    volumes:
+      - ./data:/opt/spark-data
+    networks:
+      - spark-net
+
+  spark-worker:
+    build: .
+    image: local-pyspark:3.5.1
+    container_name: spark-worker
+    hostname: spark-worker
+    depends_on:
+      - spark-master
+    command: >
+      /opt/spark/bin/spark-class
+      org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077
+    environment:
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2g
+      PYSPARK_PYTHON: python3
+      PYSPARK_DRIVER_PYTHON: python3
+    volumes:
+      - ./data:/opt/spark-data
+    networks:
+      - spark-net
+
+  # spark-worker-2:
+  #   image: local-pyspark:3.5.1
+  #   container_name: spark-worker-2
+  #   hostname: spark-worker-2
+  #   depends_on:
+  #     - spark-master
+  #   command: >
+  #     /opt/spark/bin/spark-class
+  #     org.apache.spark.deploy.worker.Worker
+  #     spark://spark-master:7077
+  #   environment:
+  #     SPARK_WORKER_CORES: 2
+  #     SPARK_WORKER_MEMORY: 2g
+  #     PYSPARK_PYTHON: python3
+  #     PYSPARK_DRIVER_PYTHON: python3
+  #   volumes:
+  #     - ./data:/opt/spark-data
+  #   networks:
+  #     - spark-net
+
+  jupyter:
+    build: .
+    image: local-pyspark:3.5.1
+    container_name: jupyter
+    hostname: jupyter
+    depends_on:
+      - spark-master
+      - spark-worker
+      #- spark-worker-2
+    command: >
+      jupyter lab
+      --ip=0.0.0.0
+      --port=8888
+      --no-browser
+      --allow-root
+      --NotebookApp.token=
+      --NotebookApp.password=
+    ports:
+      - "8888:8888"
+      - "4040:4040"
+    volumes:
+      - ./notebook:/opt/spark-notebooks
+      - ./data:/opt/spark-data
+    working_dir: /opt/spark-notebooks
+    environment:
+      SPARK_MASTER: spark://spark-master:7077
+      PYSPARK_PYTHON: python3
+      PYSPARK_DRIVER_PYTHON: python3
+    networks:
+      - spark-net
+
+networks:
+  spark-net:
+    driver: bridge
