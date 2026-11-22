@@ -1,0 +1,14 @@
+FROM debezium/connect:2.5
+
+# Télécharger et installer le connecteur OpenSearch Sink d'Aiven
+# La version 3.0.0 est compatible avec Kafka Connect 3.x (utilisé par Debezium 2.5)
+USER root
+RUN mkdir -p /kafka/connect/opensearch-sink && \
+    curl -fsSL \
+      https://github.com/Aiven-Open/opensearch-connector-for-apache-kafka/releases/download/v3.0.0/opensearch-connector-for-apache-kafka-3.0.0.tar \
+      -o /tmp/opensearch-connector.tar && \
+    tar -xf /tmp/opensearch-connector.tar \
+      -C /kafka/connect/opensearch-sink --strip-components=1 && \
+    rm /tmp/opensearch-connector.tar
+
+USER kafka

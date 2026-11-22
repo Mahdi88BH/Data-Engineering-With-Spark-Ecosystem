@@ -1,0 +1,19 @@
+{
+  "name": "opensearch-sink-connector",
+  "config": {
+    "connector.class": "io.aiven.kafka.connect.opensearch.OpensearchSinkConnector",
+    "tasks.max": "1",
+    "topics": "cdc.public.items",
+    "connection.url": "http://opensearch:9200",
+    "type.name": "_doc",
+    "key.ignore": "false",
+    "transforms": "extractId",
+    "transforms.extractId.type": "org.apache.kafka.connect.transforms.ExtractField$Key",
+    "transforms.extractId.field": "id",
+    "schema.ignore": "true",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false"
+  }
+}

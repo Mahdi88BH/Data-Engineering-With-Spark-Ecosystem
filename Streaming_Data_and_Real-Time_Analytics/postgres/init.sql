@@ -1,0 +1,33 @@
+CREATE ROLE debezium WITH LOGIN REPLICATION PASSWORD 'debezium';
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO debezium;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO debezium;
+
+CREATE TABLE IF NOT EXISTS items (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    price NUMERIC(10, 2) NOT NULL,
+    inventory INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    first_name TEXT,
+    last_name TEXT,
+    email TEXT UNIQUE,
+    is_vip BOOLEAN DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS purchases (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,
+    campaign_id VARCHAR(50),
+    quantity INTEGER,
+    purchase_price NUMERIC(10, 2),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+ALTER TABLE items     REPLICA IDENTITY FULL;
+ALTER TABLE users     REPLICA IDENTITY FULL;
+ALTER TABLE purchases REPLICA IDENTITY FULL;

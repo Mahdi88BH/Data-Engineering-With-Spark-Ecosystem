@@ -1,0 +1,3 @@
+configuration:
+  rest.address: flink-jobmanager
+  rest.port: 8081

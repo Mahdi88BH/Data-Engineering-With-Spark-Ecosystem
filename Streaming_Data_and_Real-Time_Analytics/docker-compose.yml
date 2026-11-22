@@ -1,0 +1,319 @@
+version: '3.8'
+
+services:
+  # --- Base de données source ---
+  postgres:
+    image: postgres:15
+    container_name: postgres15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgresuser
+      POSTGRES_PASSWORD: postgrespw
+      POSTGRES_DB: oneshop
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    # Active la réplication logique pour Debezium
+    command: >
+      postgres -c wal_level=logical
+               -c max_wal_senders=10
+               -c max_replication_slots=10
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgresuser -d oneshop"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cdc-net
+
+  # --- Coordination pour Kafka ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - cdc-net
+
+  # --- Broker Kafka ---
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    networks:
+      - cdc-net
+
+  # --- Kafka Connect avec Debezium pré-installé ---
+  connect:
+    build:
+      context: .
+      dockerfile: Dockerfile.connect
+    container_name: connect
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      STATUS_STORAGE_TOPIC: connect_statuses
+      # Important : active la création automatique des topics internes
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+    networks:
+      - cdc-net
+
+  # --- Moteur de recherche ---
+  opensearch:
+    image: opensearchproject/opensearch:2.11.1
+    container_name: opensearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true # Désactive la sécurité pour le lab
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    networks:
+      - cdc-net
+
+  # --- Interface graphique pour Kafka ---
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:v2.4.6
+    container_name: redpanda-console
+    restart: unless-stopped
+    depends_on:
+      - kafka
+      - connect
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./console/config.yaml:/etc/redpanda-console/config.yaml:ro
+    environment:
+      CONFIG_FILEPATH: /etc/redpanda-console/config.yaml
+    networks:
+      - cdc-net
+
+  # --- Générateur de données (à exécuter manuellement) ---
+  items-loadgen:
+    build:
+      context: ./loadgen
+      dockerfile: Dockerfile
+    container_name: items-loadgen
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgresuser
+      POSTGRES_PASSWORD: postgrespw
+      POSTGRES_DB: oneshop
+    networks:
+      - cdc-net
+    restart: "no"
+  
+  connect-init:
+    image: curlimages/curl:latest
+    container_name: connect-init
+    depends_on:
+      - connect
+      - items-loadgen
+    volumes:
+      - ./connectors:/connectors:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "
+      echo 'Waiting for Kafka Connect to be ready...';
+      until curl -s http://connect:8083/connectors > /dev/null; do sleep 2; done;
+      echo 'Registering Debezium...';
+      curl -X POST -H 'Content-Type: application/json' --data @/connectors/debezium-postgres.json http://connect:8083/connectors || true;
+      echo 'Registering OpenSearch Sink...';
+      curl -X POST -H 'Content-Type: application/json' --data @/connectors/opensearch-sink.json http://connect:8083/connectors || true;
+      echo 'Connectors registered!';
+      "
+    networks:
+      - cdc-net
+    restart: "no"
+  
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: clickhouse
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    networks: [cdc-net]
+
+  clickhouse-init:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: clickhouse-init
+    depends_on: [clickhouse]
+    volumes:
+      - ./clickhouse/init.sql:/init.sql:ro
+    environment:
+      CLICKHOUSE_PASSWORD: clickhouse
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "until clickhouse-client --host clickhouse --password clickhouse --query 'SELECT 1' >/dev/null 2>&1; do sleep 2; done;
+       clickhouse-client --host clickhouse --password clickhouse --multiquery < /init.sql;
+       echo '✓ ClickHouse schema ready'"
+    networks: [cdc-net]
+    restart: "no"
+
+  flashsale-loadgen:
+    build:
+      context: ./loadgen-flashsale
+    container_name: flashsale-loadgen
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgresuser
+      POSTGRES_PASSWORD: postgrespw
+      POSTGRES_DB: oneshop
+    networks: [cdc-net]
+
+  streamlit:
+    build:
+      context: ./streamlit
+    container_name: streamlit
+    restart: unless-stopped
+    depends_on:
+      clickhouse-init:
+        condition: service_completed_successfully
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./streamlit/app.py:/app/app.py:ro
+    networks: [cdc-net]
+
+  flink-jobmanager:
+    image: flink:1.19.1-scala_2.12-java17
+    container_name: flink-jobmanager
+    restart: unless-stopped
+    command: jobmanager
+    ports:
+      - "8081:8081"   # Flink Web UI
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.memory.process.size: 1024m
+    networks: [cdc-net]
+
+  flink-taskmanager:
+    image: flink:1.19.1-scala_2.12-java17
+    container_name: flink-taskmanager
+    restart: unless-stopped
+    command: taskmanager
+    depends_on:
+      - flink-jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 20
+        taskmanager.memory.process.size: 2048m
+    networks: [cdc-net]
+
+  login-topics-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: login-topics-init
+    depends_on:
+      - kafka
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "
+      echo 'Waiting for Kafka...';
+      until kafka-topics --bootstrap-server kafka:29092 --list >/dev/null 2>&1; do sleep 2; done;
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic login-events --partitions 3 --replication-factor 1;
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic login-events-enriched --partitions 3 --replication-factor 1;
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic login-anomalies --partitions 3 --replication-factor 1;
+      echo '✓ Topics ready.';
+      "
+    networks: [cdc-net]
+    restart: "no"
+
+  login-producer:
+    build:
+      context: ./login-producer
+    container_name: login-producer
+    restart: unless-stopped
+    depends_on:
+      login-topics-init:
+        condition: service_completed_successfully
+    networks: [cdc-net]
+
+  flink-job:
+    build:
+      context: ./flink
+    container_name: flink-job
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+      flink-taskmanager:
+        condition: service_started
+      login-topics-init:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo 'Waiting for Flink...'
+        until curl -sf http://flink-jobmanager:8081/overview > /dev/null; do sleep 3; done
+        echo 'Flink ready. Submitting SQL jobs in a single session...'
+        /opt/flink/bin/sql-client.sh \
+          -Drest.address=flink-jobmanager \
+          -Drest.port=8081 \
+          -j /opt/flink/lib/flink-sql-connector-kafka-3.2.0-1.19.jar \
+          -i /opt/flink/sql/create-tables.sql \
+          -f /opt/flink/sql/insert-jobs.sql || true
+        echo '✓ SQL submission done.'
+        exec tail -f /dev/null
+    networks: [cdc-net]
+    restart: "no"
+
+networks:
+  cdc-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  opensearch_data:
+  clickhouse_data:

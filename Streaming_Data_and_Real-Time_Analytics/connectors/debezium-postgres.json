@@ -1,0 +1,23 @@
+{
+  "name": "debezium-postgres-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "debezium",
+    "database.password": "debezium",
+    "database.dbname": "oneshop",
+    "database.server.name": "oneshop",
+    "table.include.list": "public.items,public.users,public.purchases",
+    "plugin.name": "pgoutput",
+    "decimal.handling.mode": "double",
+    "publication.autocreate.mode": "disabled",
+    "publication.name": "dbz_publication",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    "topic.prefix": "cdc"
+  }
+}
