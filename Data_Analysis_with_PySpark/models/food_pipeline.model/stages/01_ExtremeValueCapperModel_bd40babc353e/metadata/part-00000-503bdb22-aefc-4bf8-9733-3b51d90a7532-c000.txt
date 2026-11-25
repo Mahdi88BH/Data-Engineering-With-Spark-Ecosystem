@@ -1,0 +1,1 @@
+{"class":"__main__.ExtremeValueCapperModel","timestamp":1795611410204,"sparkVersion":"4.2.0","uid":"ExtremeValueCapperModel_bd40babc353e","paramMap":{"inputCol":"calories","outputCol":"calories","cap":1442.9374735100896,"floor":-487.78099011226726},"defaultParamMap":{"outputCol":"ExtremeValueCapperModel_bd40babc353e__output","boundary":0.0}}

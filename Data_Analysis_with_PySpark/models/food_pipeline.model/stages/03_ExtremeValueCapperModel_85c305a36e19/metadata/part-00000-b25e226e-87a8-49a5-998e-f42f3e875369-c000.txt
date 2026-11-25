@@ -1,0 +1,1 @@
+{"class":"__main__.ExtremeValueCapperModel","timestamp":1795611411503,"sparkVersion":"4.2.0","uid":"ExtremeValueCapperModel_85c305a36e19","paramMap":{"inputCol":"fat","outputCol":"fat","cap":92.55617192834417,"floor":-38.55291989582385},"defaultParamMap":{"outputCol":"ExtremeValueCapperModel_85c305a36e19__output","boundary":0.0}}

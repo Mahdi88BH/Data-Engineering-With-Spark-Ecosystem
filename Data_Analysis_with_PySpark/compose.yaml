@@ -13,6 +13,7 @@ services:
       - ./notebooks:/workspace/notebooks
       - ./images:/workspace/images
       - ./data:/workspace/data
+      - ./models:/workspace/models
       - ./warehouse:/workspace/warehouse
     working_dir: /workspace
     mem_limit: 6g
